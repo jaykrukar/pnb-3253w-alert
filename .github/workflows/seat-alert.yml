@@ -2,7 +2,7 @@ name: PNB 3253W seat alert
 
 on:
   schedule:
-    - cron: '*/5 * * * *
+    - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
       send_test:
