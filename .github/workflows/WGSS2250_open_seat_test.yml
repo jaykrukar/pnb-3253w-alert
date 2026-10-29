@@ -1,0 +1,86 @@
+name: WGSS 2250 open-seat test
+
+# This is ONLY a manual test, never a scheduled monitor.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-open-seat:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout tracker files
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install browser
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Test WGSS 2250 live seat detection
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          python - <<'PY'
+          import re
+          from playwright.sync_api import sync_playwright
+          from tracker import publish, seats_from_text, section_is_explicitly_full, check_section_url
+
+          COURSE = 'WGSS 2250'
+          URL = 'https://classes.uconn.edu/?details&srcdb=1273&crn=10074'
+          check_section_url(URL)
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True)
+              try:
+                  page = browser.new_page(user_agent='UConnSeatTest/1.0 (one-time student availability check)')
+                  page.goto(URL, wait_until='domcontentloaded', timeout=45000)
+                  page.get_by_text(re.compile(r'WGSS\s*2250', re.I)).first.wait_for(timeout=30000)
+                  page.wait_for_timeout(3500)
+                  body = page.locator('body').inner_text(timeout=15000)
+              finally:
+                  browser.close()
+
+          if not re.search(r'WGSS\s*2250', body, re.I):
+              raise RuntimeError('WGSS 2250 course details did not load; no alert sent.')
+          # Verify the target CRN appears in the selected section's details.
+          if not re.search(r'(?m)^\s*10074\s*$', body):
+              raise RuntimeError('Class number 10074 not found on the page; no alert sent.')
+
+          seats = seats_from_text(body)
+          if seats is None and section_is_explicitly_full(body):
+              seats = 0
+
+          print('Checking WGSS 2250 — CRN 10074 (Spring 2027).')
+          if seats is None:
+              print('Could not reliably read a numeric available-seat count. No alert sent.')
+              lines = body.splitlines()
+              for i, line in enumerate(lines):
+                  if re.search(r'\bSeats\b|Registration Notes|All Sections', line, re.I):
+                      print(f'--- Page text near line {i + 1} ---')
+                      print('\n'.join(lines[max(0, i - 2):i + 15]))
+                      if i > 100:
+                          break
+              raise RuntimeError('Need to adjust the parser for the live UConn open-section layout.')
+
+          print(f'WGSS 2250: {seats} available seat(s).')
+          if seats > 0:
+              topic = __import__('os').environ.get('NTFY_TOPIC', '').strip()
+              if not topic:
+                  raise RuntimeError('NTFY_TOPIC secret is missing; seat read succeeded but no notification was sent.')
+              publish(
+                  topic,
+                  f'ONE-TIME OPEN-SEAT TEST: UConn currently reports {seats} available seat(s) for WGSS 2250 (CRN 10074). Your PNB 3253W monitor was not changed.',
+                  'WGSS 2250: OPEN-SEAT TEST',
+                  URL,
+              )
+              print('SUCCESS: Sent a real open-seat test notification to ntfy.')
+          else:
+              print('The WGSS section is currently full; no seat-open notification was sent.')
+          print('This test never writes to .tracker_state.json and never changes the PNB monitor.')
+          PY
