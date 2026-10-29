@@ -1,0 +1,54 @@
+name: PNB 3253W seat alert
+
+on:
+  schedule:
+    - cron: '3,13,23,33,43,53 * * * *' # every 10 minutes, UTC
+  workflow_dispatch:
+    inputs:
+      send_test:
+        description: 'Send a test phone notification (does not check seats)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pnb-3253w-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install browser
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Check seats (or send test)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          TEST_NOTIFICATION: ${{ inputs.send_test == true && 'true' || 'false' }}
+        run: python tracker.py
+      - name: Save state when changed
+        if: ${{ success() && inputs.send_test != true }}
+        run: |
+          if [ -f .tracker_state.json ]; then
+            git add .tracker_state.json
+            if ! git diff --cached --quiet; then
+              git config user.name "PNB Seat Tracker"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git commit -m "Track PNB 3253W open/closed state [skip ci]"
+              git push
+            fi
+          fi
