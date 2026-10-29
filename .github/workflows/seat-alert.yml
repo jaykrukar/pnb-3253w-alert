@@ -2,7 +2,7 @@ name: PNB 3253W seat alert
 
 on:
   schedule:
-    - cron: '3,13,23,33,43,53 * * * *' # every 10 minutes, UTC
+    - cron: '7,17,27,37,47,57 * * * *' # every 10 minutes, UTC
   workflow_dispatch:
     inputs:
       send_test:
