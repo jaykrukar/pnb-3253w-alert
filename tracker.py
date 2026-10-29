@@ -75,6 +75,28 @@ def seats_from_text(body: str) -> int | None:
     return None
 
 
+def section_is_explicitly_full(body: str) -> bool:
+    """Recognize UConn's selected-section registration note 'This section is full'.
+
+    Only read section-specific notes BEFORE the Description/All Sections list;
+    other sections in the course may be full even when our target is open.
+    """
+    lines = [re.sub(r'\s+', ' ', x).strip() for x in body.splitlines()]
+    try:
+        notes_start = next(i for i, line in enumerate(lines)
+                           if line.lower() == 'registration notes')
+    except StopIteration:
+        return False
+    for line in lines[notes_start + 1: notes_start + 14]:
+        if line.lower() in ('description', 'registration restrictions',
+                            'section attributes', 'all sections', 'seats',
+                            'waitlist', 'reserved seats'):
+            break
+        if re.fullmatch(r'This section is full\.?', line, re.I):
+            return True
+    return False
+
+
 def fetch_page_text(url: str) -> str:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -125,6 +147,12 @@ def main() -> int:
         raise RuntimeError('Class details did not render / wrong term or section URL. See logs.')
 
     seats = seats_from_text(body)
+    # UConn sometimes says 'This section is full' without showing a numeric
+    # available-seat count. Accept that explicit section-level message as zero.
+    # Do not infer an OPEN seat from the absence of this message.
+    if seats is None and section_is_explicitly_full(body):
+        seats = 0
+        print('UConn explicitly reports that this section is full (0 available).')
     if seats is None:
         lines = body.splitlines()
         hits = [i for i, s in enumerate(lines) if re.search(r'\bSeats\b', s, re.I)]
