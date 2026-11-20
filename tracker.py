@@ -70,14 +70,33 @@ def seats_from_text(body: str) -> int | None:
     )
 
     if start is None:
+        # A separate Reserved Seats / Waitlist area must not be mistaken
+        # for the general enrollable seat count.
+        in_non_general_region = False
         for line in lines:
+            if re.fullmatch(
+                r"(?:Reserved Seats|Waitlist)(?:\s+Information)?",
+                line,
+                re.I,
+            ):
+                in_non_general_region = True
+                continue
+
+            if re.fullmatch(
+                r"(?:Registration Notes|Description|Section Attributes|"
+                r"Meeting Info|All Sections)",
+                line,
+                re.I,
+            ):
+                in_non_general_region = False
+
             match = re.fullmatch(
                 r"(?:Seats\s+Available|Available\s+Seats)"
                 r"\s*:?\s*(\d+)",
                 line,
                 re.I,
             )
-            if match:
+            if match and not in_non_general_region:
                 return int(match.group(1))
 
         return None
